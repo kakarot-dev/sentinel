@@ -32,3 +32,7 @@ class BillingResponse(BaseModel):
 class SeedResponse(BaseModel):
     message: str
     records_created: int
+
+class BillingSummary(BaseModel):
+    service: str
+    total_cost: float

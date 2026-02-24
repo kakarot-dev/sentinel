@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.database import get_db
 from app.models.billing import BillingRecord
@@ -8,6 +9,7 @@ from app.schemas.billing import (
     BillingCreate,
     BillingResponse,
     SeedResponse,
+    BillingSummary
 )
 from app.services.mock_data import generate_mock_records
 
@@ -48,3 +50,35 @@ def seed_mock_data(
         message=f"Seeded {len(records)} billing records over {days} days",
         records_created=len(records),
     )
+
+@router.get('/', response_model=list[BillingResponse])
+def get_billing(
+        service: str = Query(default=None),
+        region: str = Query(default=None),
+        db: Session = Depends(get_db)
+):
+    stmt = db.query(BillingRecord)
+    if service:
+        stmt = stmt.filter_by(service=service)
+    if region:
+        stmt = stmt.filter_by(region=region)
+    records = stmt.all()
+    return records
+
+@router.get('/summary', response_model=list[BillingSummary])
+def get_summary(
+        db: Session = Depends(get_db)
+):
+    total_cost = db.query(BillingRecord.service, func.sum(BillingRecord.cost).label("total_cost")).group_by(BillingRecord.service)
+    billing_data = [BillingSummary(service=row.service, total_cost=row.total_cost) for row in total_cost]
+    return billing_data
+
+@router.get('/{id}', response_model=BillingResponse)
+def get_info(
+        id: int,
+        db: Session = Depends(get_db)
+):
+    record = db.get(BillingRecord, id)
+    if not record:
+        raise HTTPException(detail="Billing Record not found", status_code=404)
+    return record
