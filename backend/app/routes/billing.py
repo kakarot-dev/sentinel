@@ -1,3 +1,6 @@
+import statistics
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -80,23 +83,22 @@ def get_anomalies(
         db: Session = Depends(get_db),
 ):
     """Return billing records with |z-score| > threshold, grouped by service."""
-    # Get mean and std dev per service
-    stats = (
-        db.query(
-            BillingRecord.service,
-            func.avg(BillingRecord.cost).label("mean"),
-            func.coalesce(func.stddev(BillingRecord.cost), 0).label("std"),
-        )
-        .group_by(BillingRecord.service)
-        .all()
-    )
+    records = db.query(BillingRecord).all()
+
+    grouped = defaultdict(list)
+    for r in records:
+        grouped[r.service].append(r)
 
     anomalies = []
-    for service, mean, std in stats:
+    for service, group in grouped.items():
+        if len(group) < 2:
+            continue
+        costs = [r.cost for r in group]
+        mean = statistics.mean(costs)
+        std = statistics.stdev(costs)
         if std == 0:
             continue
-        records = db.query(BillingRecord).filter_by(service=service).all()
-        for r in records:
+        for r in group:
             z = (r.cost - mean) / std
             if abs(z) > threshold:
                 anomalies.append(AnomalyResponse(
