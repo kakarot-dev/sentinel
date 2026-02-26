@@ -5,11 +5,12 @@ from sqlalchemy import func
 from app.database import get_db
 from app.models.billing import BillingRecord
 from app.schemas.billing import (
+    AnomalyResponse,
     BillingBatchCreate,
     BillingCreate,
     BillingResponse,
     SeedResponse,
-    BillingSummary
+    BillingSummary,
 )
 from app.services.mock_data import generate_mock_records
 
@@ -72,6 +73,45 @@ def get_summary(
     total_cost = db.query(BillingRecord.service, func.sum(BillingRecord.cost).label("total_cost")).group_by(BillingRecord.service)
     billing_data = [BillingSummary(service=row.service, total_cost=row.total_cost) for row in total_cost]
     return billing_data
+
+@router.get('/anomalies', response_model=list[AnomalyResponse])
+def get_anomalies(
+        threshold: float = Query(default=2.0, ge=0),
+        db: Session = Depends(get_db),
+):
+    """Return billing records with |z-score| > threshold, grouped by service."""
+    # Get mean and std dev per service
+    stats = (
+        db.query(
+            BillingRecord.service,
+            func.avg(BillingRecord.cost).label("mean"),
+            func.coalesce(func.stddev(BillingRecord.cost), 0).label("std"),
+        )
+        .group_by(BillingRecord.service)
+        .all()
+    )
+
+    anomalies = []
+    for service, mean, std in stats:
+        if std == 0:
+            continue
+        records = db.query(BillingRecord).filter_by(service=service).all()
+        for r in records:
+            z = (r.cost - mean) / std
+            if abs(z) > threshold:
+                anomalies.append(AnomalyResponse(
+                    id=r.id,
+                    service=r.service,
+                    cost=r.cost,
+                    timestamp=r.timestamp,
+                    region=r.region,
+                    account_id=r.account_id,
+                    z_score=round(z, 3),
+                ))
+
+    anomalies.sort(key=lambda a: abs(a.z_score), reverse=True)
+    return anomalies
+
 
 @router.get('/{id}', response_model=BillingResponse)
 def get_info(

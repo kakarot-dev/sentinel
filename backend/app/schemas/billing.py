@@ -36,3 +36,15 @@ class SeedResponse(BaseModel):
 class BillingSummary(BaseModel):
     service: str
     total_cost: float
+
+
+class AnomalyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    service: str
+    cost: float
+    timestamp: datetime
+    region: str
+    account_id: str
+    z_score: float
